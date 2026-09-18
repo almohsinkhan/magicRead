@@ -2,3 +2,4 @@ venv/
 __pycache__/
 *.pyc
 .env
+NIPS-2012-imagenet-classification-with-deep-convolutional-neural-networks-Paper.pdf

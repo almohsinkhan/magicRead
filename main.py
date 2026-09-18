@@ -22,7 +22,10 @@ class PDFViewer:
         self.page_num = 0
         self.zoom = 1.5
         self.photos = []
+
         self.last_zoom_distance = None
+        self.last_click_gesture = None
+
         self.cursor_x = 0
         self.cursor_y = 0
         self.cursor_id = None
@@ -105,20 +108,72 @@ class PDFViewer:
         # Start camera loop
         self.update_camera()
 
+    def get_word_at_cursor(self):
+
+        print("CURSOR:", self.cursor_x, self.cursor_y)
+
+        if not self.doc:
+            print("No PDF open")
+            return
+
+        page = self.doc[self.page_num]
+
+        # Page starts at y = 20
+        page_top = 20
+
+        pdf_x = (self.cursor_x - 20) / self.zoom
+        pdf_y = (self.cursor_y - page_top) / self.zoom
+
+        print("PAGE:", self.page_num)
+        print("PDF POSITION:", pdf_x, pdf_y)
+
+        words = page.get_text("words")
+
+        for word in words:
+
+            x0, y0, x1, y1, text = word[:5]
+
+            if x0 <= pdf_x <= x1 and y0 <= pdf_y <= y1:
+
+                rect = fitz.Rect(
+                    x0, y0, x1, y1
+                )
+
+                page.add_highlight_annot(rect)
+
+                # Save the PDF changes
+                self.doc.saveIncr()
+
+                self.show_page()
+
+                print("highlighted word:", text)
+
+                return
+
+        print("No word here")
+    
+    def click_cursor(self):
+        x = self.cursor_x
+        y = self.cursor_y
+
+        item = self.canvas.find_closest(x, y)
+
+        print(f"Clicked on item: {item}")
+
     def move_cursor(self, hand):
 
         width = self.canvas.winfo_width()
         height = self.canvas.winfo_height()
 
-        x = int(hand[8].x * width)
-        y = int(hand[8].y * height)
+        self.cursor_x = int(hand[8].x * width)
+        self.cursor_y = int(hand[8].y * height)
 
         self.canvas.coords(
             self.cursor_id,
-            x - 10,
-            y - 10,
-            x + 10,
-            y + 10
+            self.cursor_x - 10,
+            self.cursor_y - 10,
+            self.cursor_x + 10,
+            self.cursor_y + 10
         )
             
 
@@ -179,6 +234,15 @@ class PDFViewer:
                 hand = result.hand_landmarks[0]
 
                 gesture = detect_gesture(hand)
+
+                if gesture == "FIST":
+                    if self.last_click_gesture != "FIST":
+                        self.get_word_at_cursor()
+                        
+                    self.last_click_gesture = "FIST"
+
+                else:
+                    self.last_click_gesture = None
 
                 if gesture == "POINT":
                     
@@ -269,53 +333,65 @@ class PDFViewer:
         if not self.doc:
             return
 
+        # Clear canvas
         self.canvas.delete("all")
-
         self.photos = []
 
+        # Current page
+        page = self.doc[self.page_num]
+
+        # Render current page
+        matrix = fitz.Matrix(
+            self.zoom,
+            self.zoom
+        )
+
+        pix = page.get_pixmap(
+            matrix=matrix
+        )
+
+        image = Image.frombytes(
+            "RGB",
+            [pix.width, pix.height],
+            pix.samples
+        )
+
+        photo = ImageTk.PhotoImage(image)
+        self.photos.append(photo)
+
+        # Center page horizontally
         canvas_width = self.canvas.winfo_width()
+
+        x = max(
+            20,
+            (canvas_width - pix.width) // 2
+        )
 
         y = 20
 
-        for page in self.doc:
+        # Draw PDF
+        self.canvas.create_image(
+            x,
+            y,
+            anchor="nw",
+            image=photo
+        )
 
-            matrix = fitz.Matrix(
-                self.zoom,
-                self.zoom
-            )
-
-            pix = page.get_pixmap(
-                matrix=matrix
-            )
-
-            image = Image.frombytes(
-                "RGB",
-                [pix.width, pix.height],
-                pix.samples
-            )
-
-            photo = ImageTk.PhotoImage(image)
-
-            self.photos.append(photo)
-
-            x = max(
-                20,
-                (canvas_width - pix.width) // 2
-            )
-
-            self.canvas.create_image(
-                x,
-                y,
-                anchor="nw",
-                image=photo
-            )
-
-            y += pix.height + 20
-
+        # Scroll region = only current page
         self.canvas.config(
             scrollregion=self.canvas.bbox("all")
         )
 
+        # Create cursor on top of PDF
+        self.cursor_id = self.canvas.create_oval(
+            0,
+            0,
+            20,
+            20,
+            fill="red"
+        )
+    # which text which word
+ 
 
     def next_page(self):
 
@@ -356,7 +432,6 @@ class PDFViewer:
         self.detector.close()
 
         self.root.destroy()
-
 
 
 root = tk.Tk()
