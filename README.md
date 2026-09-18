@@ -15,7 +15,7 @@ The goal is to make reading and navigating PDFs more natural by reducing the nee
 
 ## 🎮 Controls
 
-* ✌️ Swipe left or right to change pages.
+* 🖐️ Swipe an open palm left or right to change pages.
 * 🤏 Move a pinched hand up or down to scroll.
 * 👐 Move two hands apart or together to zoom in or out.
 

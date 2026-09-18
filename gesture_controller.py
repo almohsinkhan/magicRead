@@ -12,9 +12,9 @@ class GestureController:
     ZOOM_SPEED = 6.0
     SCROLL_DEAD_ZONE = 0.002
     SCROLL_SPEED = 300
-    VICTORY_STABLE_FRAMES = 2
-    PAGE_SWIPE_DISTANCE = 0.07
-    PAGE_COOLDOWN_FRAMES = 12
+    OPEN_PALM_STABLE_FRAMES = 2
+    PAGE_SWIPE_DISTANCE = 0.05
+    PAGE_COOLDOWN_FRAMES = 10
 
     def __init__(self, viewer):
         self.viewer = viewer
@@ -26,7 +26,7 @@ class GestureController:
         self.last_pinch_y = None
         self.scroll_remainder = 0.0
 
-        self.victory_frames = 0
+        self.open_palm_frames = 0
         self.smoothed_swipe_x = None
         self.last_swipe_x = None
         self.swipe_distance = 0.0
@@ -65,7 +65,7 @@ class GestureController:
             self.viewer.zoom_by(change * self.ZOOM_SPEED)
 
     def handle_one_hand(self, hand):
-        """Use 🤏 movement to scroll and ✌️ movement to change page."""
+        """Use 🤏 movement to scroll and open-palm movement to change page."""
         self.reset_two_hand_motion()
 
         gesture = detect_gesture(hand)
@@ -97,15 +97,15 @@ class GestureController:
         self.last_pinch_y = self.smoothed_pinch_y
 
     def handle_page_swipe(self, gesture, hand):
-        """Change pages after a short, deliberate ✌️ swipe."""
-        if gesture != "VICTORY":
-            self.victory_frames = 0
+        """Change pages after a short, deliberate open-palm swipe."""
+        if gesture != "OPEN_PALM":
+            self.open_palm_frames = 0
             self.smoothed_swipe_x = None
             self.last_swipe_x = None
             self.swipe_distance = 0.0
             return
 
-        self.victory_frames += 1
+        self.open_palm_frames += 1
         self.smoothed_swipe_x = self.smooth(
             self.smoothed_swipe_x,
             hand[8].x,
@@ -115,7 +115,7 @@ class GestureController:
             self.swipe_distance += self.smoothed_swipe_x - self.last_swipe_x
         self.last_swipe_x = self.smoothed_swipe_x
 
-        if self.victory_frames < self.VICTORY_STABLE_FRAMES:
+        if self.open_palm_frames < self.OPEN_PALM_STABLE_FRAMES:
             return
 
         if self.page_cooldown > 0:
@@ -143,7 +143,7 @@ class GestureController:
         self.smoothed_pinch_y = None
         self.last_pinch_y = None
         self.scroll_remainder = 0.0
-        self.victory_frames = 0
+        self.open_palm_frames = 0
         self.smoothed_swipe_x = None
         self.last_swipe_x = None
         self.swipe_distance = 0.0
