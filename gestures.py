@@ -6,10 +6,8 @@ def distance(a, b):
 
 
 def detect_gesture(hand):
-
     # Thumb tip ↔ index tip
     pinch_distance = distance(hand[4], hand[8])
-
 
     if pinch_distance < 0.03:
         return "PINCH"
@@ -22,6 +20,10 @@ def detect_gesture(hand):
 
     if index and middle and ring and pinky:
         return "OPEN_PALM"
+
+    # Index and middle fingers extended: ✌️
+    if index and middle and not ring and not pinky:
+        return "VICTORY"
 
     if index and not middle and not ring and not pinky:
         return "POINT"

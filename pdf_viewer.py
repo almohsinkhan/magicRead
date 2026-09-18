@@ -1,56 +1,66 @@
-import cv2
-import mediapipe as mp
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
-from gestures import detect_gesture
-
 import tkinter as tk
 from tkinter import filedialog
+
 import fitz
 from PIL import Image, ImageTk
 
+from camera_controller import CameraController
+from face_controller import HeadCursorController
+from gesture_controller import GestureController
+
 
 class PDFViewer:
+    """Render and control a PDF in the Tkinter window."""
 
     def __init__(self, root):
-
-        self.cap = cv2.VideoCapture(0)
-
-        self.detector = vision.HandLandmarker.create_from_options(
-            vision.HandLandmarkerOptions(
-                base_options=python.BaseOptions(
-                    model_asset_path="hand_landmarker.task"
-                ),
-                running_mode=vision.RunningMode.VIDEO,
-                num_hands=1
-            )
-        )
-
-        self.timestamp = 0
-        self.last_y = None
-
-        self.update_camera()
         self.root = root
         self.root.title("MagicRead")
 
         self.doc = None
         self.page_num = 0
+        self.page = None
         self.zoom = 1.5
+        self.photos = []
 
-        self.canvas = tk.Canvas(root, bg="gray")
+        self.cursor_x = 0
+        self.cursor_y = 0
+        self.cursor_id = None
+        self.cursor_smoothing = 0.30
+
+        self.pdf_x_screen = 20
+        self.pdf_y_screen = 20
+
+        self.create_interface()
+
+        self.gesture_controller = GestureController(self)
+        self.head_cursor_controller = HeadCursorController(self)
+        self.camera = CameraController(
+            root,
+            self.gesture_controller.handle_landmarks,
+            self.head_cursor_controller.handle_landmarks,
+        )
+        self.camera.start()
+
+    def create_interface(self):
+        """Create the PDF canvas, scrolling controls, and buttons."""
+        self.canvas = tk.Canvas(self.root, bg="gray")
         self.canvas.pack(fill="both", expand=True)
+        self.cursor_id = self.canvas.create_oval(0, 0, 10, 10, fill="red")
 
         self.canvas.bind("<MouseWheel>", self.on_mousewheel)
         self.canvas.bind("<Button-4>", self.on_mousewheel)
         self.canvas.bind("<Button-5>", self.on_mousewheel)
         self.canvas.bind("<Configure>", self.on_resize)
 
-        scrollbar = tk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
+        scrollbar = tk.Scrollbar(
+            self.root,
+            orient="vertical",
+            command=self.canvas.yview,
+        )
         scrollbar.pack(side="right", fill="y")
         self.canvas.config(yscrollcommand=scrollbar.set)
 
-
-        controls = tk.Frame(root)
+        controls = tk.Frame(self.root)
         controls.pack()
 
         tk.Button(controls, text="Open", command=self.open_pdf).pack(side="left")
@@ -59,115 +69,126 @@ class PDFViewer:
         tk.Button(controls, text="Zoom +", command=self.zoom_in).pack(side="left")
         tk.Button(controls, text="Zoom -", command=self.zoom_out).pack(side="left")
 
+    def get_word_at_cursor(self):
+        """Highlight the PDF word below the virtual cursor."""
+        print("CURSOR:", self.cursor_x, self.cursor_y)
+
+        if not self.doc:
+            print("No PDF open")
+            return
+
+        self.doc.save("highlighted.pdf", garbage=4, deflate=True)
+
+        page = self.doc[self.page_num]
+        pdf_x = (self.cursor_x - self.pdf_x_screen) / self.zoom
+        pdf_y = (self.cursor_y - self.pdf_y_screen) / self.zoom
+
+        print("PAGE:", self.page_num)
+        print("PDF POSITION:", pdf_x, pdf_y)
+
+        for word in page.get_text("words"):
+            x0, y0, x1, y1, text = word[:5]
+
+            if x0 <= pdf_x <= x1 and y0 <= pdf_y <= y1:
+                page.add_highlight_annot(fitz.Rect(x0, y0, x1, y1))
+                self.show_page()
+                print("highlighted word:", text)
+                return
+
+        print("No word here")
+
+    def click_cursor(self):
+        """Report the canvas item closest to the virtual cursor."""
+        item = self.canvas.find_closest(self.cursor_x, self.cursor_y)
+        print(f"Clicked on item: {item}")
+
+    def move_cursor(self, hand):
+        """Move the virtual cursor from a hand landmark (legacy helper)."""
+        self.move_cursor_to(hand[8].x, hand[8].y)
+
+    def move_cursor_from_face(self, face):
+        """Move the cursor from the face's nose-tip position."""
+        nose_tip = face[HeadCursorController.NOSE_TIP_INDEX]
+        self.move_cursor_to(nose_tip.x, nose_tip.y)
+
+    def move_cursor_to(self, normalized_x, normalized_y):
+        """Move the virtual cursor to normalized camera coordinates."""
+        target_x = normalized_x * self.canvas.winfo_width()
+        target_y = normalized_y * self.canvas.winfo_height()
+
+        self.cursor_x += (target_x - self.cursor_x) * self.cursor_smoothing
+        self.cursor_y += (target_y - self.cursor_y) * self.cursor_smoothing
+        self.cursor_x = int(self.cursor_x)
+        self.cursor_y = int(self.cursor_y)
+
+        if self.cursor_id is not None:
+            self.canvas.coords(
+                self.cursor_id,
+                self.cursor_x - 5,
+                self.cursor_y - 5,
+                self.cursor_x + 5,
+                self.cursor_y + 5,
+            )
+
     def update_camera(self):
+        """Process a camera frame when an external caller requests one."""
+        self.camera.update()
 
-        success, frame = self.cap.read()
+    def scroll(self, amount):
+        self.canvas.yview_scroll(amount, "units")
 
-        if success:
-            frame = cv2.flip(frame, 1)
-
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-            image = mp.Image(
-                image_format=mp.ImageFormat.SRGB,
-                data=rgb
-            )
-
-            self.timestamp += 1
-
-            result = self.detector.detect_for_video(
-                image,
-                self.timestamp
-            )
-
-            if result.hand_landmarks:
-
-                hand = result.hand_landmarks[0]
-                gesture = detect_gesture(hand)
-
-                if gesture == "PINCH":
-
-                    y = hand[8].y
-
-                    if self.last_y is not None:
-
-                        movement = y - self.last_y
-
-                        if movement < -0.01:
-                            self.scroll(-3)
-
-                        elif movement > 0.01:
-                            self.scroll(3)
-
-                    self.last_y = y
-
-                else:
-                    self.last_y = None
-
-        self.root.after(10, self.update_camera)
-        
     def on_mousewheel(self, event):
         if event.num == 4:
-            self.canvas.yview_scroll(-3, "units")
+            self.scroll(-3)
         elif event.num == 5:
-            self.canvas.yview_scroll(3, "units")
+            self.scroll(3)
         else:
-            self.canvas.yview_scroll(
-                int(-event.delta / 120),
-                "units"
-        )
+            self.scroll(int(-event.delta / 120))
 
-    def on_resize(self, event):
+    def on_resize(self, _event):
         if self.doc:
             self.show_page()
 
     def open_pdf(self):
-        path = filedialog.askopenfilename(
-            filetypes=[("PDF files", "*.pdf")]
-        )
+        path = filedialog.askopenfilename(filetypes=[("PDF files", "*.pdf")])
 
         if path:
+            self.pdf_path = path
             self.doc = fitz.open(path)
             self.page_num = 0
             self.show_page()
 
     def show_page(self):
+        """Render the current PDF page and redraw the virtual cursor."""
         if not self.doc:
             return
 
         self.canvas.delete("all")
         self.photos = []
-        canvas_width = self.canvas.winfo_width()
 
+        page = self.doc[self.page_num]
+        pix = page.get_pixmap(matrix=fitz.Matrix(self.zoom, self.zoom))
+        image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        photo = ImageTk.PhotoImage(image)
+        self.photos.append(photo)
+
+        x = max(20, (self.canvas.winfo_width() - pix.width) // 2)
         y = 20
+        self.pdf_x_screen = x
+        self.pdf_y_screen = y
 
-        for page in self.doc:
-            matrix = fitz.Matrix(self.zoom, self.zoom)
-            pix = page.get_pixmap(matrix=matrix)
-
-            image = Image.frombytes(
-                "RGB",
-                [pix.width, pix.height],
-                pix.samples
-            )
-
-            photo = ImageTk.PhotoImage(image)
-            self.photos.append(photo)
-            
-            x = max(20, (canvas_width - pix.width) // 2)
-
-            self.canvas.create_image(
-                x,
-                y,
-                anchor="nw",
-                image=photo
-            )
-
-            y += pix.height + 20
-
-        self.canvas.config(
-            scrollregion=self.canvas.bbox("all")
+        self.canvas.create_image(x, y, anchor="nw", image=photo)
+        self.cursor_id = self.canvas.create_oval(
+            self.cursor_x - 5,
+            self.cursor_y - 5,
+            self.cursor_x + 5,
+            self.cursor_y + 5,
+            fill="red",
+            outline="white",
+            width=2,
         )
+        self.canvas.tag_raise(self.cursor_id)
+        self.canvas.config(scrollregion=self.canvas.bbox("all"))
 
     def next_page(self):
         if self.doc and self.page_num < len(self.doc) - 1:
@@ -188,13 +209,15 @@ class PDFViewer:
             self.zoom -= 0.2
             self.show_page()
 
-    def scroll(self, amount):
-        self.canvas.yview_scroll(amount, "units")
+    def close(self):
+        """Save highlights and release application resources."""
+        if self.doc:
+            try:
+                output_path = "MagicRead_highlighted.pdf"
+                self.doc.save(output_path, garbage=4, deflate=True)
+                print(f"Saved highlighted PDF: {output_path}")
+            except Exception as error:
+                print("Error saving PDF:", error)
 
-
-root = tk.Tk()
-root.geometry("1000x700")
-
-viewer = PDFViewer(root)
-
-root.mainloop()
+        self.camera.close()
+        self.root.destroy()
