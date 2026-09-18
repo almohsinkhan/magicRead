@@ -15,10 +15,8 @@ The goal is to make reading and navigating PDFs more natural by reducing the nee
 
 ## 🎮 Controls
 
-* 🙂 Move your head left, right, up, or down to move the virtual cursor.
 * ✌️ Swipe left or right to change pages.
 * 🤏 Move a pinched hand up or down to scroll.
-* ✊ Make a fist to highlight the word under the cursor.
 * 👐 Move two hands apart or together to zoom in or out.
 
 ## 🛠️ Tech Stack

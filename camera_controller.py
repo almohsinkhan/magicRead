@@ -5,13 +5,13 @@ from mediapipe.tasks.python import vision
 
 
 class CameraController:
-    """Read webcam frames and provide detected hand and face landmarks."""
+    """Read webcam frames and provide hand landmarks with optional face tracking."""
 
     def __init__(
         self,
         root,
         on_hand_landmarks,
-        on_face_landmarks,
+        on_face_landmarks=None,
         hand_model_path="hand_landmarker.task",
         face_model_path="face_landmarker.task",
     ):
@@ -32,16 +32,18 @@ class CameraController:
                 min_tracking_confidence=0.5,
             )
         )
-        self.face_detector = vision.FaceLandmarker.create_from_options(
-            vision.FaceLandmarkerOptions(
-                base_options=python.BaseOptions(model_asset_path=face_model_path),
-                running_mode=vision.RunningMode.VIDEO,
-                num_faces=1,
-                min_face_detection_confidence=0.5,
-                min_face_presence_confidence=0.5,
-                min_tracking_confidence=0.5,
+        self.face_detector = None
+        if on_face_landmarks:
+            self.face_detector = vision.FaceLandmarker.create_from_options(
+                vision.FaceLandmarkerOptions(
+                    base_options=python.BaseOptions(model_asset_path=face_model_path),
+                    running_mode=vision.RunningMode.VIDEO,
+                    num_faces=1,
+                    min_face_detection_confidence=0.5,
+                    min_face_presence_confidence=0.5,
+                    min_tracking_confidence=0.5,
+                )
             )
-        )
 
     def start(self):
         """Start processing webcam frames."""
@@ -62,10 +64,11 @@ class CameraController:
 
             self.timestamp += 1
             hand_result = self.detector.detect_for_video(image, self.timestamp)
-            face_result = self.face_detector.detect_for_video(image, self.timestamp)
 
             self.on_hand_landmarks(hand_result.hand_landmarks)
-            self.on_face_landmarks(face_result.face_landmarks)
+            if self.face_detector:
+                face_result = self.face_detector.detect_for_video(image, self.timestamp)
+                self.on_face_landmarks(face_result.face_landmarks)
 
         self.root.after(10, self.update)
 
@@ -74,4 +77,5 @@ class CameraController:
         self.is_running = False
         self.cap.release()
         self.detector.close()
-        self.face_detector.close()
+        if self.face_detector:
+            self.face_detector.close()

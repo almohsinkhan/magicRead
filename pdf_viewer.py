@@ -5,12 +5,13 @@ import fitz
 from PIL import Image, ImageTk
 
 from camera_controller import CameraController
-from face_controller import HeadCursorController
 from gesture_controller import GestureController
 
 
 class PDFViewer:
     """Render and control a PDF in the Tkinter window."""
+
+    ENABLE_CURSOR_CONTROL = False
 
     def __init__(self, root):
         self.root = root
@@ -25,7 +26,7 @@ class PDFViewer:
         self.cursor_x = 0
         self.cursor_y = 0
         self.cursor_id = None
-        self.cursor_smoothing = 0.30
+        self.cursor_smoothing = 0.45
 
         self.pdf_x_screen = 20
         self.pdf_y_screen = 20
@@ -33,19 +34,15 @@ class PDFViewer:
         self.create_interface()
 
         self.gesture_controller = GestureController(self)
-        self.head_cursor_controller = HeadCursorController(self)
-        self.camera = CameraController(
-            root,
-            self.gesture_controller.handle_landmarks,
-            self.head_cursor_controller.handle_landmarks,
-        )
+        self.camera = CameraController(root, self.gesture_controller.handle_landmarks)
         self.camera.start()
 
     def create_interface(self):
         """Create the PDF canvas, scrolling controls, and buttons."""
         self.canvas = tk.Canvas(self.root, bg="gray")
         self.canvas.pack(fill="both", expand=True)
-        self.cursor_id = self.canvas.create_oval(0, 0, 10, 10, fill="red")
+        if self.ENABLE_CURSOR_CONTROL:
+            self.cursor_id = self.canvas.create_oval(0, 0, 10, 10, fill="red")
 
         self.canvas.bind("<MouseWheel>", self.on_mousewheel)
         self.canvas.bind("<Button-4>", self.on_mousewheel)
@@ -121,6 +118,19 @@ class PDFViewer:
         self.cursor_x = int(self.cursor_x)
         self.cursor_y = int(self.cursor_y)
 
+        self.draw_cursor()
+
+    def move_cursor_by(self, normalized_x, normalized_y):
+        """Move the cursor by relative, normalized camera movement."""
+        width = self.canvas.winfo_width()
+        height = self.canvas.winfo_height()
+        self.cursor_x = int(max(0, min(width, self.cursor_x + normalized_x * width)))
+        self.cursor_y = int(max(0, min(height, self.cursor_y + normalized_y * height)))
+
+        self.draw_cursor()
+
+    def draw_cursor(self):
+        """Redraw the virtual cursor at its current location."""
         if self.cursor_id is not None:
             self.canvas.coords(
                 self.cursor_id,
@@ -159,7 +169,7 @@ class PDFViewer:
             self.show_page()
 
     def show_page(self):
-        """Render the current PDF page and redraw the virtual cursor."""
+        """Render the current PDF page."""
         if not self.doc:
             return
 
@@ -178,16 +188,17 @@ class PDFViewer:
         self.pdf_y_screen = y
 
         self.canvas.create_image(x, y, anchor="nw", image=photo)
-        self.cursor_id = self.canvas.create_oval(
-            self.cursor_x - 5,
-            self.cursor_y - 5,
-            self.cursor_x + 5,
-            self.cursor_y + 5,
-            fill="red",
-            outline="white",
-            width=2,
-        )
-        self.canvas.tag_raise(self.cursor_id)
+        if self.ENABLE_CURSOR_CONTROL:
+            self.cursor_id = self.canvas.create_oval(
+                self.cursor_x - 5,
+                self.cursor_y - 5,
+                self.cursor_x + 5,
+                self.cursor_y + 5,
+                fill="red",
+                outline="white",
+                width=2,
+            )
+            self.canvas.tag_raise(self.cursor_id)
         self.canvas.config(scrollregion=self.canvas.bbox("all"))
 
     def next_page(self):
@@ -201,12 +212,16 @@ class PDFViewer:
             self.show_page()
 
     def zoom_in(self):
-        self.zoom += 0.2
-        self.show_page()
+        self.zoom_by(0.2)
 
     def zoom_out(self):
-        if self.zoom > 0.4:
-            self.zoom -= 0.2
+        self.zoom_by(-0.2)
+
+    def zoom_by(self, amount):
+        """Apply a smooth, movement-driven zoom amount."""
+        new_zoom = max(0.4, min(4.0, self.zoom + amount))
+        if new_zoom != self.zoom:
+            self.zoom = new_zoom
             self.show_page()
 
     def close(self):
