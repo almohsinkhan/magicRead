@@ -7,6 +7,7 @@ class GestureController:
     """Turn deliberate hand movement into PDF navigation."""
 
     POSITION_SMOOTHING = 0.45
+    PAN_SMOOTHING = 0.75
     ZOOM_STABLE_FRAMES = 3
     ZOOM_DEAD_ZONE = 0.002
     ZOOM_SPEED = 6.0
@@ -25,6 +26,10 @@ class GestureController:
         self.smoothed_pinch_y = None
         self.last_pinch_y = None
         self.scroll_remainder = 0.0
+
+        self.smoothed_side_x = None
+        self.last_side_x = None
+        self.horizontal_remainder = 0.0
 
         self.open_palm_frames = 0
         self.smoothed_swipe_x = None
@@ -65,11 +70,12 @@ class GestureController:
             self.viewer.zoom_by(change * self.ZOOM_SPEED)
 
     def handle_one_hand(self, hand):
-        """Use 🤏 movement to scroll and open-palm movement to change page."""
+        """Use 🤏 to scroll, ✌️ to pan, and an open palm to change page."""
         self.reset_two_hand_motion()
 
         gesture = detect_gesture(hand)
         self.handle_scroll(gesture, hand)
+        self.handle_horizontal_scroll(gesture, hand)
         self.handle_page_swipe(gesture, hand)
 
     def handle_scroll(self, gesture, hand):
@@ -80,9 +86,16 @@ class GestureController:
             self.scroll_remainder = 0.0
             return
 
+        if not self.viewer.can_scroll_vertically():
+            self.smoothed_pinch_y = None
+            self.last_pinch_y = None
+            self.scroll_remainder = 0.0
+            return
+
         self.smoothed_pinch_y = self.smooth(
             self.smoothed_pinch_y,
             hand[8].y,
+            self.PAN_SMOOTHING,
         )
 
         if self.last_pinch_y is not None:
@@ -91,10 +104,41 @@ class GestureController:
                 self.scroll_remainder += movement * self.SCROLL_SPEED
                 amount = math.trunc(self.scroll_remainder)
                 if amount:
-                    self.viewer.scroll(amount)
+                    self.viewer.scroll(-amount)
                     self.scroll_remainder -= amount
 
         self.last_pinch_y = self.smoothed_pinch_y
+
+    def handle_horizontal_scroll(self, gesture, hand):
+        """Pan a zoomed page left or right while holding a ✌️ gesture."""
+        if gesture != "VICTORY":
+            self.smoothed_side_x = None
+            self.last_side_x = None
+            self.horizontal_remainder = 0.0
+            return
+
+        if not self.viewer.can_scroll_horizontally():
+            self.smoothed_side_x = None
+            self.last_side_x = None
+            self.horizontal_remainder = 0.0
+            return
+
+        self.smoothed_side_x = self.smooth(
+            self.smoothed_side_x,
+            hand[8].x,
+            self.PAN_SMOOTHING,
+        )
+
+        if self.last_side_x is not None:
+            movement = self.smoothed_side_x - self.last_side_x
+            if abs(movement) >= self.SCROLL_DEAD_ZONE:
+                self.horizontal_remainder += movement * self.SCROLL_SPEED
+                amount = math.trunc(self.horizontal_remainder)
+                if amount:
+                    self.viewer.scroll_horizontal(-amount)
+                    self.horizontal_remainder -= amount
+
+        self.last_side_x = self.smoothed_side_x
 
     def handle_page_swipe(self, gesture, hand):
         """Change pages after a short, deliberate open-palm swipe."""
@@ -124,10 +168,10 @@ class GestureController:
             return
 
         if self.swipe_distance > self.PAGE_SWIPE_DISTANCE:
-            self.viewer.next_page()
+            self.viewer.previous_page()
             self.reset_page_swipe()
         elif self.swipe_distance < -self.PAGE_SWIPE_DISTANCE:
-            self.viewer.previous_page()
+            self.viewer.next_page()
             self.reset_page_swipe()
 
     def reset_page_swipe(self):
@@ -143,6 +187,9 @@ class GestureController:
         self.smoothed_pinch_y = None
         self.last_pinch_y = None
         self.scroll_remainder = 0.0
+        self.smoothed_side_x = None
+        self.last_side_x = None
+        self.horizontal_remainder = 0.0
         self.open_palm_frames = 0
         self.smoothed_swipe_x = None
         self.last_swipe_x = None
@@ -152,7 +199,7 @@ class GestureController:
         self.reset_two_hand_motion()
         self.reset_one_hand_motion()
 
-    def smooth(self, previous, current):
+    def smooth(self, previous, current, amount=None):
         if previous is None:
             return current
-        return previous + (current - previous) * self.POSITION_SMOOTHING
+        return previous + (current - previous) * (amount or self.POSITION_SMOOTHING)

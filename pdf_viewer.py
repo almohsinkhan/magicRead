@@ -147,6 +147,20 @@ class PDFViewer:
     def scroll(self, amount):
         self.canvas.yview_scroll(amount, "units")
 
+    def scroll_horizontal(self, amount):
+        """Pan the current page horizontally when it is wider than the view."""
+        self.canvas.xview_scroll(amount, "units")
+
+    def can_scroll_vertically(self):
+        """Return whether the rendered page extends below the visible canvas."""
+        bbox = self.canvas.bbox("all")
+        return bool(bbox and bbox[3] - bbox[1] > self.canvas.winfo_height())
+
+    def can_scroll_horizontally(self):
+        """Return whether the rendered page extends beyond the canvas width."""
+        bbox = self.canvas.bbox("all")
+        return bool(bbox and bbox[2] - bbox[0] > self.canvas.winfo_width())
+
     def on_mousewheel(self, event):
         if event.num == 4:
             self.scroll(-3)
